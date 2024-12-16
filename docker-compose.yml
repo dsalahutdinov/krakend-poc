@@ -1,0 +1,104 @@
+x-app-service-template: &ruby-app
+  image: ruby:latest
+  environment:
+    DS9_USE_SYSTEM_LIBRARIES: "1"
+    HISTFILE: /app/tmp/.bash_history
+    BUNDLE_PATH: /usr/local/bundle
+    BUNDLE_CONFIG: /app/.bundle/config
+    prometheus_multiproc_dir: /tmp
+  stdin_open: true
+  tty: true
+  working_dir: /app
+  tmpfs:
+    - /tmp
+
+services:
+  ruby:
+    <<:
+      - *ruby-app
+    command: bash
+    volumes:
+      - bundler_data:/usr/local/bundle
+      - .:/app:cached
+
+  stores:
+    <<:
+      - *ruby-app
+    command: bundle exec rackup -p9292 --host 0.0.0.0
+    volumes:
+      - bundler_data:/usr/local/bundle
+      - ./stores:/app:cached
+  delivery-conditions:
+    <<:
+      - *ruby-app
+    command: bundle exec rackup -p9292 --host 0.0.0.0
+    volumes:
+      - bundler_data:/usr/local/bundle
+      - ./delivery-conditions:/app:cached
+
+  krakend_ce:
+    # The :watch image restarts the service automatically when the configuration files change.
+    # Do not use this image in production, it's meant to speed up your testing and development.
+    image: devopsfaith/krakend:watch
+    volumes:
+      - ./krakend/config:/etc/krakend
+    ports:
+      - "1234:1234"
+      - "8080:8080"
+      - "8090:8090"
+      - "9090:9090"
+    command: ["run", "-d", "-c", "/etc/krakend/krakend.json"]
+    depends_on:
+      - stores
+      - delivery-conditions
+
+  prometheus:
+    image: prom/prometheus:v2.17.1
+    container_name: prometheus
+    volumes:
+      - ./prometheus:/etc/prometheus
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+    expose:
+      - 9090
+    depends_on:
+     - krakend_ce
+
+  grafana:
+    image: grafana/grafana:11.2.2-security-01
+    container_name: grafana
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=password
+      - GF_USERS_ALLOW_SIGN_UP=false
+    restart: unless-stopped
+    expose:
+      - 3000
+    ports:
+     - "3000:3000"
+    depends_on:
+     - prometheus
+
+  k6:
+    image: grafana/k6
+    command: run /app/k6.js
+    profiles: [manual-run]
+    volumes:
+      - .:/app:cached
+    sysctls:
+      - net.ipv4.tcp_tw_reuse=1
+
+volumes:
+  bundler_data:
+  prometheus_data:
+  grafana_data:

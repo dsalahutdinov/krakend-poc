@@ -1,0 +1,188 @@
+{
+  "$schema": "https://www.krakend.io/schema/v3.json",
+  "version": 3,
+  "name": "KrakenD Community API Gateway",
+  "port": 8080,
+  "host": ["http://fake_api"],
+  "timeout": "3000ms",
+  "cache_ttl": "300s",
+  "endpoints": [
+    {
+      "@comment": "Stores API Aggregation (search & enrich)",
+      "endpoint": "/api/v2/stores",
+      "backend": [
+        {
+          "host": ["http://stores:9292"],
+          "url_pattern": "/search",
+          "mapping": {
+            "stores": "search"
+          },
+          "extra_config": {
+            "modifier/lua-backend": {
+              "allow_open_libs": true,
+               "sources": ["./collect_store_ids.lua"],
+               "live": true,
+               "post": "collect_store_ids(response.load())"
+            }
+          }
+        },
+        {
+          "host": ["http://localhost:8080"],
+          "url_pattern": "/api/v2/stores/enrich?store_ids={resp0_store_ids}",
+          "extra_config": {
+            "modifier/lua-backend": {
+              "allow_open_libs": true,
+               "sources": ["./collect_enrichments.lua"],
+               "live": true,
+               "post": "collect_enrichments(response.load())"
+            }
+          }
+ 
+        }
+      ],
+     "extra_config": {
+        "proxy": {
+          "sequential": true
+        }
+     }
+    },
+    {
+      "@comment": "Enrich stores",
+      "endpoint": "/api/v2/stores/enrich",
+
+      "@comment2": "See details here https://www.krakend.io/docs/endpoints/parameter-forwarding/",
+      "input_query_strings": [
+        "store_ids"
+      ],
+
+      "backend": [
+        {
+          "host": ["http://delivery-conditions:9292"],
+          "url_pattern": "/deliveries",
+          "mapping": {
+            "stores": "deliveries"
+          }
+        },
+        {
+          "host": ["http://delivery-conditions:9292"],
+          "url_pattern": "/extra_fields",
+          "mapping": {
+            "stores": "extra_fields"
+          }
+        }
+      ]
+    },
+    {
+      "@comment": "Feature: Aggregation + Basic transformation (filtering & mapping) + grouping",
+      "endpoint": "/git/{user}",
+      "backend": [
+        {
+          "host": ["https://api.github.com"],
+          "url_pattern": "/users/{user}",
+          "allow": [
+            "avatar_url",
+            "name",
+            "company",
+            "blog",
+            "location",
+            "mail",
+            "hireable",
+            "followers",
+            "public_repos",
+            "public_gists"
+          ],
+          "mapping": {
+            "blog": "website"
+          },
+          "group": "user"
+        },
+        {
+          "host": ["https://api.github.com"],
+          "url_pattern": "/users/{user}/repos",
+          "mapping": {
+            "collection": "repos"
+          },
+          "is_collection": true
+        }
+      ]
+    }
+  ],
+  "sequential_start": true,
+  "async_agent": [
+    {
+      "name": "async-agent-demo",
+      "backend": [
+        {
+          "host":[ "http://127.0.0.1:8080" ],
+          "url_pattern": "/__debug/async-agent-demo",
+          "method": "POST"
+        }
+      ],
+      "consumer": {
+        "topic": "*.bar",
+        "workers": 20
+      },
+      "connection": {
+        "max_retries": 10,
+        "backoff_strategy": "exponential-jitter"
+      },
+      "extra_config": {
+      }
+    }
+  ],
+  "extra_config": {
+    "telemetry/metrics": {
+      "collection_time": "30s",
+      "listen_address": ":8090"
+    },
+    "telemetry/logging": {
+      "level": "DEBUG",
+      "prefix": "[KRAKEND]",
+      "syslog": false,
+      "stdout": true
+    },
+     "telemetry/opentelemetry": {
+            "service_name": "krakend_prometheus_service",
+            "metric_reporting_period": 1,
+            "exporters": {
+                "prometheus": [
+                    {
+                        "name": "local_prometheus",
+                        "port": 9090,
+                        "process_metrics": true,
+                        "go_metrics": true
+                    }
+                ]
+            }
+        },
+    "telemetry/opencensus": {
+      "sample_rate": 100,
+      "reporting_period": 1,
+      "enabled_layers": {
+        "backend": true,
+        "router": true
+      },
+      "exporters": {
+        "jaeger": {
+          "endpoint": "http://jaeger:14268/api/traces",
+          "service_name": "krakend"
+        }
+      }
+    },
+    "security/cors": {
+      "allow_origins": ["*"],
+      "allow_methods": ["POST", "GET"],
+      "allow_headers": ["Origin", "Authorization", "Content-Type"],
+      "expose_headers": ["Content-Length"],
+      "max_age": "12h"
+    },
+    "auth/revoker": {
+      "N": 10000000,
+      "P": 0.0000001,
+      "hash_name": "optimal",
+      "TTL": 1500,
+      "port": 1234,
+      "token_keys": ["jti"]
+    }
+  }
+}
