@@ -131,10 +131,6 @@
     }
   ],
   "extra_config": {
-    "telemetry/metrics": {
-      "collection_time": "30s",
-      "listen_address": ":8090"
-    },
     "telemetry/logging": {
       "level": "DEBUG",
       "prefix": "[KRAKEND]",
@@ -142,8 +138,29 @@
       "stdout": true
     },
      "telemetry/opentelemetry": {
-            "service_name": "krakend_prometheus_service",
+            "service_name": "krakend_service",
             "metric_reporting_period": 1,
+      "metric_reporting_period": 1,
+      "layers": {
+        "global": {
+          "report_headers": true
+        },
+        "proxy": {
+          "report_headers": true
+        },
+        "backend": {
+          "metrics": {
+            "disable_stage": true
+          },
+          "traces": {
+            "disable_stage": false,
+            "round_trip": true,
+            "read_payload": true,
+            "detailed_connection": true,
+            "report_headers": true
+          }
+        }
+      },
             "exporters": {
                 "prometheus": [
                     {
@@ -152,22 +169,17 @@
                         "process_metrics": true,
                         "go_metrics": true
                     }
-                ]
+                ],
+
+        "otlp": [
+          {
+            "name": "krakend_service",
+            "host": "jaeger",
+            "use_http": false,
+            "disable_metrics": true
+          }
+        ]
             }
-        },
-    "telemetry/opencensus": {
-      "sample_rate": 100,
-      "reporting_period": 1,
-      "enabled_layers": {
-        "backend": true,
-        "router": true
-      },
-      "exporters": {
-        "jaeger": {
-          "endpoint": "http://jaeger:14268/api/traces",
-          "service_name": "krakend"
-        }
-      }
     },
     "security/cors": {
       "allow_origins": ["*"],
